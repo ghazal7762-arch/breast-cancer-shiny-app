@@ -1,13 +1,17 @@
-# Breast Cancer Detection – Shiny app
-# Packages: shiny, ggplot2, dplyr, readxl
-# install.packages(c("shiny","ggplot2","dplyr","readxl"))  # run once if needed
+# ─────────────────────────────────────────────────────────────
+# Breast Cancer Detection Dashboard – Shiny App
+# ─────────────────────────────────────────────────────────────
+# Packages needed:
+# shiny, ggplot2, dplyr, readxl, tidyr
+# ─────────────────────────────────────────────────────────────
 
 library(shiny)
 library(ggplot2)
 library(dplyr)
 library(readxl)
+library(tidyr)
 
-# ─── Load data from Excel ────────────────────────────────────────────────
+# ─── Load data ───────────────────────────────────────────────
 data_raw <- read_excel("breast_cancer_cleanfile.xlsx")
 
 # Rename columns by POSITION
@@ -25,25 +29,17 @@ colnames(data_raw) <- c(
   "Men_mammo"
 )
 
-# Make Year character (to allow things like "2025 (estimate)")
-# and convert the rest to numeric
+# Prepare data
 data <- data_raw %>%
   mutate(
-    Year         = as.character(Year),
-    Women_cases  = as.numeric(Women_cases),
-    Men_cases    = as.numeric(Men_cases),
-    Women_self   = as.numeric(Women_self),
-    Men_self     = as.numeric(Men_self),
-    Women_doctor = as.numeric(Women_doctor),
-    Men_doctor   = as.numeric(Men_doctor),
-    Women_us     = as.numeric(Women_us),
-    Men_us       = as.numeric(Men_us),
-    Women_mammo  = as.numeric(Women_mammo),
-    Men_mammo    = as.numeric(Men_mammo)
+    Year = as.character(Year),
+    Year_num = suppressWarnings(as.numeric(Year)),
+    across(-c(Year, Year_num), as.numeric)
   )
 
-# ─── UI ──────────────────────────────────────────────────────────────────
+# ─── UI ──────────────────────────────────────────────────────
 ui <- fluidPage(
+  
   tags$head(
     tags$style(HTML("
       body { background-color: #ffeef7; }
@@ -53,20 +49,23 @@ ui <- fluidPage(
     "))
   ),
   
-  titlePanel("🎀 Breast Cancer Detection 🎀"),
+  titlePanel("🎀 Breast Cancer Detection Dashboard 🎀"),
   
   sidebarLayout(
+    
     sidebarPanel(
       width = 3,
+      
       wellPanel(
         h4("Select Year"),
         radioButtons(
           "year",
           label = NULL,
-          choices = data$Year,        # use character years directly
-          selected = tail(data$Year,1)
+          choices = data$Year,
+          selected = tail(data$Year, 1)
         )
       ),
+      
       wellPanel(
         h4("Select Gender"),
         radioButtons(
@@ -75,114 +74,193 @@ ui <- fluidPage(
           choices = c("Women", "Men"),
           selected = "Women"
         )
-      ),
-      wellPanel(
-        h4("Detection Type"),
-        radioButtons(
-          "method",
-          label = NULL,
-          choices = c("Self-exam", "Doctor", "Ultrasound", "Mammography"),
-          selected = "Self-exam"
-        )
       )
     ),
     
     mainPanel(
       width = 9,
-      h3("Filtered Results"),
-      tableOutput("filtered_table"),
-      br(),
-      h3(textOutput("chart_title")),
-      plotOutput("barplot", height = "350px")
+      
+      tabsetPanel(
+        
+        # ── TAB 1 ────────────────────────────────────────────
+        tabPanel(
+          "📊 Methods Comparison (Single Year)",
+          
+          h3("Detection Methods Comparison"),
+          textOutput("subtitle_bar"),
+          br(),
+          
+          plotOutput("barplot", height = "420px"),
+          br(),
+          
+          tableOutput("summary_table")
+        ),
+        
+        # ── TAB 2 ────────────────────────────────────────────
+        tabPanel(
+          "📈 Trends Over Time",
+          
+          h3("Detection Trends Over Time"),
+          textOutput("subtitle_trend"),
+          br(),
+          
+          plotOutput("scatterplot", height = "450px")
+        )
+      )
     )
   )
 )
 
-# ─── SERVER ──────────────────────────────────────────────────────────────
+# ─── SERVER ──────────────────────────────────────────────────
 server <- function(input, output, session) {
   
-  # Get one row for the selected year (now character comparison)
+  # Selected year row
   selected_row <- reactive({
     data %>% filter(Year == input$year)
   })
   
-  # Get percent and cases based on gender + method
-  current_values <- reactive({
+  # ── Bar chart data ────────────────────────────────────────
+  comparison_data <- reactive({
     row <- selected_row()
-    if (nrow(row) == 0) return(NULL)
+    req(nrow(row) == 1)
     
-    gender <- input$gender
-    method <- input$method
-    
-    total_cases <- if (gender == "Women") row$Women_cases else row$Men_cases
-    
-    percent <- dplyr::case_when(
-      gender == "Women" & method == "Self-exam"   ~ row$Women_self,
-      gender == "Women" & method == "Doctor"      ~ row$Women_doctor,
-      gender == "Women" & method == "Ultrasound"  ~ row$Women_us,
-      gender == "Women" & method == "Mammography" ~ row$Women_mammo,
-      gender == "Men"   & method == "Self-exam"   ~ row$Men_self,
-      gender == "Men"   & method == "Doctor"      ~ row$Men_doctor,
-      gender == "Men"   & method == "Ultrasound"  ~ row$Men_us,
-      gender == "Men"   & method == "Mammography" ~ row$Men_mammo,
-      TRUE ~ NA_real_
-    )
-    
-    list(
-      year        = row$Year,
-      gender      = gender,
-      method      = method,
-      percent     = percent,
-      proportion  = percent / 100,
-      total_cases = total_cases
+    if (input$gender == "Women") {
+      tibble(
+        Method = c("Self-exam", "Doctor", "Ultrasound", "Mammography"),
+        Percent = c(
+          row$Women_self,
+          row$Women_doctor,
+          row$Women_us,
+          row$Women_mammo
+        )
+      )
+    } else {
+      tibble(
+        Method = c("Self-exam", "Doctor", "Ultrasound", "Mammography"),
+        Percent = c(
+          row$Men_self,
+          row$Men_doctor,
+          row$Men_us,
+          row$Men_mammo
+        )
+      )
+    }
+  })
+  
+  # Subtitle bar
+  output$subtitle_bar <- renderText({
+    paste(
+      "Comparison of detection methods for",
+      input$gender,
+      "in",
+      input$year
     )
   })
   
-  # Filtered results table
-  output$filtered_table <- renderTable({
-    cv <- current_values()
-    if (is.null(cv) || is.na(cv$percent)) return(NULL)
-    
-    tibble(
-      Year           = cv$year,
-      Gender         = cv$gender,
-      DetectionType  = cv$method,
-      Percent        = round(cv$percent, 2),
-      EstimatedCases = round(cv$proportion * cv$total_cases)
-    )
-  }, digits = 2)
-  
-  # Chart title
-  output$chart_title <- renderText({
-    cv <- current_values()
-    if (is.null(cv)) return("")
-    paste("Detection Rate in", cv$year, "-", cv$gender, "(", cv$method, ")")
-  })
-  
-  # Bar chart
+  # Bar plot
   output$barplot <- renderPlot({
-    cv <- current_values()
-    if (is.null(cv) || is.na(cv$percent)) return(NULL)
+    df <- comparison_data()
+    req(df)
     
-    df <- data.frame(
-      DetectionType = cv$method,
-      Percent = cv$percent
-    )
-    
-    ggplot(df, aes(x = DetectionType, y = Percent)) +
-      geom_col(width = 0.4, fill = "#ff66b3") +
-      coord_cartesian(ylim = c(0, max(100, cv$percent + 10))) +
-      geom_text(aes(label = paste0(round(Percent), "%")),
-                vjust = -0.5, size = 6) +
-      labs(x = "", y = "Percent (%)") +
+    ggplot(df, aes(Method, Percent, fill = Method)) +
+      geom_col(width = 0.65) +
+      geom_text(
+        aes(label = paste0(round(Percent), "%")),
+        vjust = -0.5,
+        size = 5
+      ) +
+      coord_cartesian(ylim = c(0, max(100, df$Percent + 10))) +
+      labs(
+        x = "Detection Method",
+        y = "Percentage (%)"
+      ) +
       theme_minimal(base_size = 14) +
       theme(
-        axis.title.y = element_text(color = "#d81b60"),
-        axis.text.x  = element_text(color = "#d81b60"),
-        panel.grid.minor = element_blank()
+        legend.position = "none",
+        axis.text.x = element_text(angle = 20, hjust = 1),
+        axis.title.y = element_text(color = "#d81b60")
+      )
+  })
+  
+  # Summary table
+  output$summary_table <- renderTable({
+    comparison_data() %>%
+      mutate(Percent = round(Percent, 2))
+  })
+  
+  # ── Trend data ────────────────────────────────────────────
+  trend_data <- reactive({
+    
+    base <- if (input$gender == "Women") {
+      data %>%
+        select(
+          Year,
+          Year_num,
+          Self = Women_self,
+          Doctor = Women_doctor,
+          Ultrasound = Women_us,
+          Mammography = Women_mammo
+        )
+    } else {
+      data %>%
+        select(
+          Year,
+          Year_num,
+          Self = Men_self,
+          Doctor = Men_doctor,
+          Ultrasound = Men_us,
+          Mammography = Men_mammo
+        )
+    }
+    
+    base %>%
+      pivot_longer(
+        cols = c(Self, Doctor, Ultrasound, Mammography),
+        names_to = "Method",
+        values_to = "Percent"
+      ) %>%
+      filter(!is.na(Year_num))
+  })
+  
+  # Subtitle trend
+  output$subtitle_trend <- renderText({
+    paste(
+      "Temporal trends of breast cancer detection methods for",
+      input$gender
+    )
+  })
+  
+  # Scatter + line plot
+  output$scatterplot <- renderPlot({
+    df <- trend_data()
+    req(df)
+    
+    ggplot(
+      df,
+      aes(
+        x = Year_num,
+        y = Percent,
+        color = Method,
+        shape = Method
+      )
+    ) +
+      geom_point(size = 3) +
+      geom_line(aes(group = Method), linewidth = 1) +
+      scale_x_continuous(breaks = unique(df$Year_num)) +
+      labs(
+        x = "Year",
+        y = "Detection Percentage (%)",
+        color = "Detection Method",
+        shape = "Detection Method"
+      ) +
+      theme_minimal(base_size = 14) +
+      theme(
+        axis.title = element_text(color = "#d81b60"),
+        axis.text  = element_text(color = "#880e4f"),
+        legend.position = "bottom"
       )
   })
 }
 
-# ─── Run app ─────────────────────────────────────────────────────────────
+# ─── Run App ────────────────────────────────────────────────
 shinyApp(ui = ui, server = server)
